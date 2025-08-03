@@ -1,0 +1,15 @@
+FlightDelayPrediction/*.pkl
+.venv/
+.vscode/
+analysis/plots
+analysis/plots_old
+analysis/.Rhistory
+analysis/.RData
+analysis/analysis.r
+analysis/Further_testing.R
+analysis/Normality_Boxplot.R
+.DS_Store
+Predicting-Death-Time-and-Mortality/Model/Code/Notebooks/phase1_gridsearch_12h.pkl
+Predicting-Death-Time-and-Mortality/Model/Code/Notebooks/phase1_gridsearch_24h.pkl
+Predicting-Death-Time-and-Mortality/Model/Code/Notebooks/phase1_gridsearch_6h.pkl
+analysis/.DS_Store
