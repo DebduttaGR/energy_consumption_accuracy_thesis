@@ -67,12 +67,6 @@ From the **orchestrator device**, use the **experiment-runner** to run the exper
 Use the following Python script:
 
 ```
-run_two_phase.py
-```
-
-Configure and launch the experiment using this config file:
-
-```
 experiment-runner/examples/uc1/RunnerConfig.py
 ```
 
@@ -121,12 +115,6 @@ From the **orchestrator device**, use **experiment-runner** to execute the exper
 Use the following script:
 
 ```
-Predicting-Death-Time-and-Mortality/Model/Code/Notebooks/two_phase_pipeline.py
-```
-
-Configuration file:
-
-```
 experiment-runner/examples/uc2/RunnerConfig.py
 ```
 
@@ -152,7 +140,6 @@ To analyze and visualize the results:
 ├── EnergiBridge/
 ├── experiment-runner/
 ├── analysis/
-├── requirements.txt
 └── README.md
 ```
 
@@ -160,12 +147,8 @@ To analyze and visualize the results:
 
 ## 📬 Contact & Citation
 
-For questions, feedback, or contributions, please open an issue or reach out via \[your contact/email here].
+For questions, feedback, or contributions, please open an issue or reach out via \[d.guha.roy@student.vu.nl].
 
-If you use this repository in your research, please consider citing the associated paper:
+If you use this repository in your research, please consider citing the associated paper
 
-> Author Name, *On the Energy Consumption and Accuracy of ML Model Composition*, Year.
-
----
-
-Let me know if you'd like to generate a citation format (e.g., BibTeX) or add badges like Python version, license, etc.
+> Debdutta Guha Roy, *On the Energy Consumption and Accuracy of ML Model Composition: A Controlled Experiment With Two-Stage Prediction Use Cases*, 2025.
