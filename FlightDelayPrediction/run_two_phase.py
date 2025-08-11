@@ -9,10 +9,10 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score, a
 from pathlib import Path
 
 def load_data(base_dir):
-    print("[INFO] Loading data...")
+    #print("[INFO] Loading data...")
     final_csv = base_dir / 'data' / 'Flight_Weather.csv'
     df = pd.read_csv(final_csv)
-    print("[INFO] Data loaded.")
+    #print("[INFO] Data loaded.")
     data_label_encoder = LabelEncoder()
     data_label_encoder.fit(df['Airport'])
     df['EncodedAirport'] = data_label_encoder.transform(df['Airport'])
@@ -21,7 +21,7 @@ def load_data(base_dir):
     return X, y
 
 def train_models(X_train, y_train):
-    print("[INFO] Loading models...")
+    #print("[INFO] Loading models...")
     Xc_train = X_train.drop('ArrDel15', axis=1)
     yc_train = y_train['ArrDel15']
     Xr_train = X_train[X_train['ArrDel15'] == 1].drop('ArrDel15', axis=1)
@@ -32,11 +32,11 @@ def train_models(X_train, y_train):
     with open("RFR.pkl", "rb") as f:
         rfr = pickle.load(f)
 
-    print("[INFO] Models loaded.")
+    #print("[INFO] Models loaded.")
     return clf, rfr
 
 def evaluate_at_threshold(clf, rfr, X_test, y_test, gating_threshold):
-    print(f"[INFO] Evaluating at threshold {gating_threshold}...")
+    #print(f"[INFO] Evaluating at threshold {gating_threshold}...")
     Xc_test = X_test.drop('ArrDel15', axis=1)
     yc_test = y_test['ArrDel15']
     Xr_test = X_test[X_test['ArrDel15'] == 1].drop('ArrDel15', axis=1)
@@ -50,8 +50,8 @@ def evaluate_at_threshold(clf, rfr, X_test, y_test, gating_threshold):
         # Baseline: Phase 2 only
         y2_pred_delay = (rfr.predict(Xc_test) >= 15).astype(int)  # classify based on delay minutes >= 15
         acc = accuracy_score(yc_test, y2_pred_delay)
+        invocation_rate = 1.0
     else:
-        # PDTM-style gating for two-phase system
         conf = np.maximum(proba, 1 - proba)
         mask = conf >= gating_threshold  # which samples go to Phase 2
         final_pred = phase1_pred.copy()
@@ -63,13 +63,40 @@ def evaluate_at_threshold(clf, rfr, X_test, y_test, gating_threshold):
             phase2_delay_pred = (rfr.predict(X2) >= 15).astype(int)
             final_pred[idx_phase2] = phase2_delay_pred
 
-        acc = accuracy_score(yc_test, final_pred)
+            acc = accuracy_score(yc_test, final_pred)
+    
+            invocation_rate = mask.mean()
+   # if gating_threshold >= 1.0:
+        #invocation_rate = 1.0  # Phase 2 invoked on all samples
 
-    print(f"Alpha={gating_threshold}, Accuracy={acc:.4f}")
+    # End-to-end prediction array
+    y_full_pred = np.zeros(len(y_test))  
+
+    # Flights predicted delayed by Phase 1
+    predicted_delayed_idx = np.where((proba >= gating_threshold))[0]
+
+    # Compute regressor predictions and valid indices
+    y2_pred = rfr.predict(Xr_test)
+    valid_idx = Xr_test.index
+
+    # Use Phase 2 regression for those flights (if they exist in regressor index)
+    for i in predicted_delayed_idx:
+        if i in valid_idx:
+            y_full_pred[i] = y2_pred[list(valid_idx).index(i)]  # predicted minutes
+        else:
+            y_full_pred[i] = 15  # or some default delay threshold
+
+    # End-to-end metrics
+    mae = mean_absolute_error(y_test['ArrDelayMinutes'], y_full_pred)
+    rmse = np.sqrt(mean_squared_error(y_test['ArrDelayMinutes'], y_full_pred))
+    r2 = r2_score(y_test['ArrDelayMinutes'], y_full_pred)
+
+
+    print(f"{gating_threshold},{invocation_rate:.4f},{mae:.4f},{rmse:.4f},{r2:.4f},{acc:.4f}")
     return acc
 
 if __name__ == "__main__":
-    print("[INFO] Starting Flight Delay Prediction...")
+    #print("[INFO] Starting Flight Delay Prediction...")
     p = argparse.ArgumentParser()
     p.add_argument("--threshold", "-t", type=float, required=True,
                    help="gating threshold α in [0,1]")
@@ -85,4 +112,4 @@ if __name__ == "__main__":
 
     clf, rfr = train_models(X_train, y_train)
     evaluate_at_threshold(clf, rfr, X_test, y_test, args.threshold)
-    print("[INFO] Flight Delay Prediction completed.")
+    #print("[INFO] Flight Delay Prediction completed.")
