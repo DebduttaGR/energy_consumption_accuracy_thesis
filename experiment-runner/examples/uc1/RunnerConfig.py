@@ -27,7 +27,7 @@ class RunnerConfig:
     time_between_runs_in_ms = 60000
 
     # SSH / remote settings
-    ssh_host           = "GL5"
+    ssh_host           = "gl1"
     ssh_user           = "debdutta"
     remote_workdir     = "/home/debdutta/Experiment/FlightDelayPrediction"
     remote_activate    = "source /home/debdutta/Experiment/py13env/bin/activate"
@@ -142,11 +142,11 @@ class RunnerConfig:
             last_exc = None
             for attempt in range(1, 4):
                 try:
-                    subprocess.check_call(["scp", remote, str(local)])
+                    subprocess.check_call(["rsync","-avz", remote, str(local)])
                     break
                 except Exception as e:
                     last_exc = e
-                    output.console_log(f"[WARN] scp attempt {attempt} for {fname} failed: {e}")
+                    output.console_log(f"[WARN] rsync attempt {attempt} for {fname} failed: {e}")
                     time.sleep(2)
             else:
                 # after 3 attempts still failing

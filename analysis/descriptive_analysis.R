@@ -8,7 +8,7 @@ library(psych)
 #library(patchwork)   # for wrap_plots()
 library(grid)      # for textGrob(), gpar(), grid.newpage(), grid.draw()
 library(gridExtra) # for arrangeGrob()
-install.packages(c("dplyr","tidyr","effsize"))  # if not already installed
+#install.packages(c("dplyr","tidyr","effsize"))  # if not already installed
 
 # 1. Data Import -----------------------------------------------------------
 # Adjust file paths as needed
@@ -772,7 +772,7 @@ pdtm_med <- summary_table_pdtm %>%
     values_to = "median_accuracy"
   ) %>%
   mutate(
-    usecase = recode(usecase,
+    usecase = dplyr::recode(usecase,
                      "median_accuracy_6h"  = "PDTM-6h",
                      "median_accuracy_12h" = "PDTM-12h",
                      "median_accuracy_24h" = "PDTM-24h")
@@ -871,4 +871,291 @@ with(df_pdtm, {
                 h, round(a_test$estimate,3), signif(a_test$p.value,3)))
   }
 })
+
+#-----
+# For Holm's
+# Robust pairwise test function (handles constant diffs / few samples)
+library(dplyr)
+library(tidyr)
+library(effsize)   # for cliff.delta
+library(stats)
+
+run_pairwise_tests <- function(df_long, metric_col, id_col = "X__run_id",
+                               baseline = 1.0,
+                               thresholds = c(0.1,0.3,0.5,0.7,0.9)) {
+  # df_long must have columns: id_col, threshold, <metric_col>
+  # Returns tidy data.frame with one row per threshold (compared to baseline)
+  
+  # 1) pivot wide (one row per repetition)
+  df_wide <- df_long %>%
+    mutate(repetition = as.integer(sub(".*repetition_(\\d+)$", "\\1", .data[[id_col]]))) %>%
+    select(repetition, threshold, !!rlang::sym(metric_col)) %>%
+    pivot_wider(
+      id_cols = repetition,
+      names_from = threshold,
+      names_prefix = "thr_",
+      values_from = !!rlang::sym(metric_col)
+    )
+  
+  # helper to safe-run tests on two numeric vectors (paired)
+  safe_tests <- function(x, y) {
+    # drop NA pairs
+    keep <- !is.na(x) & !is.na(y)
+    x <- x[keep]; y <- y[keep]
+    n <- length(x)
+    
+    # initialize
+    out <- list(
+      n_pairs = n,
+      shapiro_W = NA_real_,
+      shapiro_p = NA_real_,
+      wilcox_V  = NA_real_,
+      wilcox_p  = NA_real_,
+      cliffs_d  = NA_real_,
+      cliffs_mag= NA_character_
+    )
+    
+    if (n == 0) {
+      return(out)
+    }
+    
+    # paired diffs
+    diffs <- x - y
+    # Shapiro: only when >= 3 samples AND not constant
+    if (n >= 3 && !all(diffs == diffs[1])) {
+      sw <- tryCatch(shapiro.test(diffs), error = function(e) NULL)
+      if (!is.null(sw)) {
+        out$shapiro_W <- unname(sw$statistic)
+        out$shapiro_p <- sw$p.value
+      }
+    } else {
+      out$shapiro_W <- NA_real_
+      out$shapiro_p <- NA_real_
+    }
+    
+    # Wilcoxon signed rank (paired) - if all x == y then trivially no difference
+    if (all(x == y)) {
+      out$wilcox_V <- NA_real_
+      out$wilcox_p <- 1.0
+    } else {
+      wt <- tryCatch(
+        wilcox.test(x, y, paired = TRUE, alternative = "two.sided", exact = FALSE),
+        error = function(e) NULL
+      )
+      if (!is.null(wt)) {
+        # wt$statistic may be named; coerce to numeric
+        out$wilcox_V <- as.numeric(unname(wt$statistic))
+        out$wilcox_p <- wt$p.value
+      }
+    }
+    
+    # Cliff's delta (effsize::cliff.delta) - handle errors
+    cd <- tryCatch(cliff.delta(x, y), error = function(e) NULL)
+    if (!is.null(cd)) {
+      # cd$estimate is numeric; cd$magnitude is text
+      out$cliffs_d   <- as.numeric(cd$estimate)
+      out$cliffs_mag <- as.character(cd$magnitude)
+    }
+    return(out)
+  }
+  
+  # 2) iterate thresholds and collect results
+  results_list <- lapply(thresholds, function(th) {
+    col_th   <- paste0("thr_", th)
+    col_base <- paste0("thr_", baseline)
+    if (! (col_th %in% colnames(df_wide)) ) {
+      stop("Column ", col_th, " not found in wide data. Check thresholds present.")
+    }
+    if (! (col_base %in% colnames(df_wide)) ) {
+      stop("Baseline column ", col_base, " not found in wide data.")
+    }
+    
+    x <- df_wide[[col_th]]
+    y <- df_wide[[col_base]]
+    tst <- safe_tests(x, y)
+    
+    data.frame(
+      metric     = metric_col,
+      threshold  = th,
+      n_pairs    = tst$n_pairs,
+      shapiro_W  = tst$shapiro_W,
+      shapiro_p  = tst$shapiro_p,
+      wilcox_V   = tst$wilcox_V,
+      wilcox_p   = tst$wilcox_p,
+      cliffs_d   = tst$cliffs_d,
+      cliffs_mag = tst$cliffs_mag,
+      stringsAsFactors = FALSE
+    )
+  })
+  
+  bind_rows(results_list)
+}
+
+res_fdp_energy <- run_pairwise_tests(df_fdp, "energy_j")
+res_fdp_time   <- run_pairwise_tests(df_fdp, "runtime_s")
+res_fdp_acc    <- run_pairwise_tests(df_fdp, "accuracy")
+
+# Combine FDP results into one table (add usecase column)
+results_fdp_all <- bind_rows(res_fdp_energy, res_fdp_time, res_fdp_acc) %>%
+  mutate(usecase = "FDP")
+print(results_fdp_all)
+
+res_pdtm_energy <- run_pairwise_tests(df_pdtm, "energy_j")
+res_pdtm_time   <- run_pairwise_tests(df_pdtm, "runtime_s")
+
+res_pdtm_acc_6  <- run_pairwise_tests(df_pdtm, "accuracy_6h")
+res_pdtm_acc_12 <- run_pairwise_tests(df_pdtm, "accuracy_12h")
+res_pdtm_acc_24 <- run_pairwise_tests(df_pdtm, "accuracy_24h")
+
+results_pdtm_all <- bind_rows(res_pdtm_energy, res_pdtm_time,
+                              res_pdtm_acc_6, res_pdtm_acc_12, res_pdtm_acc_24) %>%
+  mutate(usecase = "PDTM")
+print(results_pdtm_all)
+
+
+library(dplyr)
+
+# make a single combined results table
+all_results_raw <- bind_rows(results_fdp_all, results_pdtm_all)
+
+# Apply Holm within each family (usecase x metric)
+all_results_adj <- all_results_raw %>%
+  group_by(usecase, metric) %>%
+  arrange(wilcox_p) %>%   # optional
+  mutate(
+    p_holm = p.adjust(wilcox_p, method = "holm"),
+    sig_holm = ifelse(is.na(p_holm), NA, p_holm < 0.05)
+  ) %>%
+  ungroup()
+
+# View
+print(all_results_adj)
+
+
+#-------------------------------------------------------------------------------------
+# Repeating the plots for better visibility
+library(dplyr)
+library(ggplot2)
+library(RColorBrewer)
+
+# Ensure thresholds have the proper factor ordering
+thr_levels <- c(0.1, 0.3, 0.5, 0.7, 0.9, 1.0)
+df_fdp2  <- df_fdp  %>% mutate(thr_f = factor(threshold, levels = thr_levels))
+df_pdtm2 <- df_pdtm %>% mutate(thr_f = factor(threshold, levels = thr_levels))
+
+# colour palette (6 colours)
+pal <- RColorBrewer::brewer.pal(6, "Set2")
+
+# ---------- Helper to add median line, point and label ----------
+add_median_layer <- function(df, ycol) {
+  # compute medians per threshold (for numeric labels)
+  med_df <- df %>%
+    group_by(thr_f) %>%
+    summarize(med = median(.data[[ycol]], na.rm = TRUE)) %>%
+    ungroup()
+  
+  # return list of geom/stat layers to add to ggplot
+  list(
+    # black median horizontal line (crossbar with zero height)
+    stat_summary(fun = median, geom = "crossbar", width = 0.6,
+                 colour = "black", fatten = 0, size = 0.8, show.legend = FALSE),
+    # black median point
+    stat_summary(fun = median, geom = "point", size = 3, colour = "black", show.legend = FALSE),
+    # numeric label above median
+    geom_text(data = med_df, aes(x = thr_f, y = med, label = sprintf("%.1f", med)),
+              vjust = -0.8, colour = "black", size = 3)
+  )
+}
+
+# ---------- ENERGY: FDP ----------
+p_energy_fdp <- ggplot(df_fdp2, aes(x = thr_f, y = energy_j, fill = thr_f)) +
+  geom_boxplot(outlier.shape = 21, outlier.size = 1, alpha = 0.9) +
+  scale_fill_manual(values = pal) +
+  labs(title = "FDP: Energy per Sample by Threshold",
+       x = "Gating Threshold (α)", y = "Energy per Sample (J)", fill = "Threshold") +
+  theme_minimal() +
+  theme(legend.position = "bottom") +
+  add_median_layer(df_fdp2, "energy_j")  # add median line/point/label
+
+ggsave("plots/energy_boxplot_FDP_median_black.png", p_energy_fdp, width = 8, height = 5, dpi = 300)
+
+# ---------- ENERGY QQ (FDP) ----------
+# QQ panels keep coloured points but medians aren't relevant for QQ; keep legend hidden
+p_energy_qq_fdp <- ggplot(df_fdp2, aes(sample = energy_j, colour = thr_f)) +
+  stat_qq() + stat_qq_line() +
+  scale_colour_manual(values = pal) +
+  facet_wrap(~ thr_f, nrow = 1, scales = "free") +
+  labs(title = "FDP: Q–Q Plots of Energy by Threshold",
+       x = "Theoretical Quantiles", y = "Sample Quantiles", colour = "Threshold") +
+  theme_minimal() + theme(legend.position = "none", strip.text = element_text(size = 9))
+
+ggsave("plots/energy_qq_FDP.png", p_energy_qq_fdp, width = 12, height = 3, dpi = 300)
+
+
+# ---------- ENERGY: PDTM ----------
+p_energy_pdtm <- ggplot(df_pdtm2, aes(x = thr_f, y = energy_j, fill = thr_f)) +
+  geom_boxplot(outlier.shape = 21, outlier.size = 1, alpha = 0.9) +
+  scale_fill_manual(values = pal) +
+  labs(title = "PDTM: Energy per Sample by Threshold",
+       x = "Gating Threshold (α)", y = "Energy per Sample (J)", fill = "Threshold") +
+  theme_minimal() + theme(legend.position = "bottom") +
+  add_median_layer(df_pdtm2, "energy_j")
+
+ggsave("plots/energy_boxplot_PDTM_median_black.png", p_energy_pdtm, width = 8, height = 5, dpi = 300)
+
+p_energy_qq_pdtm <- ggplot(df_pdtm2, aes(sample = energy_j, colour = thr_f)) +
+  stat_qq() + stat_qq_line() +
+  scale_colour_manual(values = pal) +
+  facet_wrap(~ thr_f, nrow = 1, scales = "free") +
+  labs(title = "PDTM: Q–Q Plots of Energy by Threshold",
+       x = "Theoretical Quantiles", y = "Sample Quantiles", colour = "Threshold") +
+  theme_minimal() + theme(legend.position = "none", strip.text = element_text(size = 9))
+
+ggsave("plots/energy_qq_PDTM.png", p_energy_qq_pdtm, width = 12, height = 3, dpi = 300)
+
+
+# ---------- EXECUTION TIME: FDP ----------
+p_time_fdp <- ggplot(df_fdp2, aes(x = thr_f, y = runtime_s, fill = thr_f)) +
+  geom_boxplot(outlier.shape = 21, outlier.size = 1, alpha = 0.9) +
+  scale_fill_manual(values = pal) +
+  labs(title = "FDP: Execution Time per Sample by Threshold",
+       x = "Gating Threshold (α)", y = "Execution Time per Sample (ms)", fill = "Threshold") +
+  theme_minimal() + theme(legend.position = "bottom") +
+  add_median_layer(df_fdp2, "runtime_s")
+
+ggsave("plots/time_boxplot_FDP_median_black.png", p_time_fdp, width = 8, height = 5, dpi = 300)
+
+p_time_qq_fdp <- ggplot(df_fdp2, aes(sample = runtime_s, colour = thr_f)) +
+  stat_qq() + stat_qq_line() +
+  scale_colour_manual(values = pal) +
+  facet_wrap(~ thr_f, nrow = 1, scales = "free") +
+  labs(title = "FDP: Q–Q Plots of Execution Time by Threshold",
+       x = "Theoretical Quantiles", y = "Sample Quantiles") +
+  theme_minimal() + theme(legend.position = "none", strip.text = element_text(size = 9))
+
+ggsave("plots/time_qq_FDP.png", p_time_qq_fdp, width = 12, height = 3, dpi = 300)
+
+
+# ---------- EXECUTION TIME: PDTM ----------
+p_time_pdtm <- ggplot(df_pdtm2, aes(x = thr_f, y = runtime_s, fill = thr_f)) +
+  geom_boxplot(outlier.shape = 21, outlier.size = 1, alpha = 0.9) +
+  scale_fill_manual(values = pal) +
+  labs(title = "PDTM: Execution Time per Sample by Threshold",
+       x = "Gating Threshold (α)", y = "Execution Time per Sample (ms)", fill = "Threshold") +
+  theme_minimal() + theme(legend.position = "bottom") +
+  add_median_layer(df_pdtm2, "runtime_s")
+
+ggsave("plots/time_boxplot_PDTM_median_black.png", p_time_pdtm, width = 8, height = 5, dpi = 300)
+
+p_time_qq_pdtm <- ggplot(df_pdtm2, aes(sample = runtime_s, colour = thr_f)) +
+  stat_qq() + stat_qq_line() +
+  scale_colour_manual(values = pal) +
+  facet_wrap(~ thr_f, nrow = 1, scales = "free") +
+  labs(title = "PDTM: Q–Q Plots of Execution Time by Threshold",
+       x = "Theoretical Quantiles", y = "Sample Quantiles") +
+  theme_minimal() + theme(legend.position = "none", strip.text = element_text(size = 9))
+
+ggsave("plots/time_qq_PDTM.png", p_time_qq_pdtm, width = 12, height = 3, dpi = 300)
+
+message("Saved black-median boxplots and QQ plots into the 'plots/' folder.")
 
