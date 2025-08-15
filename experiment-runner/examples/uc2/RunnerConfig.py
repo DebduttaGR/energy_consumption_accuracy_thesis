@@ -27,7 +27,7 @@ class RunnerConfig:
     time_between_runs_in_ms = 60000
 
     # SSH / remote settings
-    ssh_host           = "GL5"
+    ssh_host           = "gl1"
     ssh_user           = "debdutta"
     remote_workdir     = "/home/debdutta/Experiment/Predicting-Death-Time-and-Mortality/Model/Code/Notebooks"
     remote_activate    = "source /home/debdutta/Experiment/uc2/bin/activate"
@@ -55,10 +55,10 @@ class RunnerConfig:
             factors     = [f_uc, f_th],
             repetitions = reps,
             data_columns=[
-                "energy_j","runtime_s","cpu_w","mem_mb","invocation_rate",
-                "roc_auc_6h","accuracy_6h","f1_macro_6h",
-                "roc_auc_12h","accuracy_12h","f1_macro_12h",
-                "roc_auc_24h","accuracy_24h","f1_macro_24h"
+                "energy_j","runtime_s","cpu_w","mem_mb",
+                "invocation_rate_6h","accuracy_6h","precision_micro_6h","precision_macro_6h","recall_micro_6h","recall_macro_6h","f1_micro_6h","f1_macro_6h",
+                "invocation_rate_12h","accuracy_12h","precision_micro_12h","precision_macro_12h","recall_micro_12h","recall_macro_12h","f1_micro_12h","f1_macro_12h",
+                "invocation_rate_24h","accuracy_24h","precision_micro_24h","precision_macro_24h","recall_micro_24h","recall_macro_24h","f1_micro_24h","f1_macro_24h",
             ]
         )
         return self.run_table_model
@@ -72,7 +72,7 @@ class RunnerConfig:
     def start_measurement(self, context: RunnerContext):
         th      = context.execute_run["threshold"]
         ssh     = f"{self.ssh_user}@{self.ssh_host}"
-        run_cmd = f"python3 two_phase_pipeline.py --threshold {th} > metrics.csv"
+        run_cmd = f"python3 two_phase_pipeline.py --threshold {th} --pos-prob-gate > metrics.csv"
         eb_cmd  = "energibridge --output energibridge.csv --summary"
 
         remote_cmd = (
@@ -144,7 +144,7 @@ class RunnerConfig:
             last_exc = None
             for attempt in range(1, 4):
                 try:
-                    subprocess.check_call(["scp", remote, str(local)])
+                    subprocess.check_call(["scp","-O", remote, str(local)])
                     break
                 except Exception as e:
                     last_exc = e
@@ -165,9 +165,17 @@ class RunnerConfig:
         for _, row in rows.iterrows():
             self.ml_metrics.append({
                 "window_hours": float(row["window"]),
-                "ROC_AUC":      float(row["roc_auc"]),
-                "Accuracy":     float(row["accuracy"]),
-                "F1-Macro":     float(row["macro_f1"]),
+                "invocation_rate": float(row["invocation_rate"]),
+                "accuracy": float(row["accuracy"]),
+                "precision_micro": float(row["precision_micro"]),
+                "precision_macro": float(row["precision_macro"]),
+                "recall_micro": float(row["recall_micro"]),
+                "recall_macro": float(row["recall_macro"]),
+                "f1_micro": float(row["f1_micro"]),
+                "f1_macro": float(row["f1_macro"]),
+                # "ROC_AUC":      float(row[""]),
+                # "Accuracy":     float(row["accuracy"]),
+                # "F1-Macro":     float(row["macro_f1"]),
             })
     
     def populate_run_data(self, context: RunnerContext) -> Dict[str, Any]:
@@ -183,9 +191,16 @@ class RunnerConfig:
         flat = {}
         for m in self.ml_metrics:
             w = int(m["window_hours"])       # 6, 12, or 24
-            flat[f"roc_auc_{w}h"]   = m["ROC_AUC"]
-            flat[f"accuracy_{w}h"]  = m["Accuracy"]
-            flat[f"f1_macro_{w}h"]  = m["F1-Macro"]
+            #flat[f"roc_auc_{w}h"]   = m["ROC_AUC"]
+            #flat[f"f1_macro_{w}h"]  = m["F1-Macro"]
+            flat[f"invocation_rate_{w}h"] = m["invocation_rate"]
+            flat[f"accuracy_{w}h"]  = m["accuracy"]
+            flat[f"precision_micro_{w}h"] = m["precision_micro"]
+            flat[f"precision_macro_{w}h"] = m["precision_macro"]
+            flat[f"recall_micro_{w}h"] = m["recall_micro"]
+            flat[f"recall_macro_{w}h"] = m["recall_macro"]
+            flat[f"f1_micro_{w}h"] = m["f1_micro"]
+            flat[f"f1_macro_{w}h"] = m["f1_macro"]
 
         # 3) build and return a single dict
         return {
@@ -193,7 +208,7 @@ class RunnerConfig:
             "runtime_s":      runtime,
             "cpu_w":          cpu,
             "mem_mb":         mem,
-            "invocation_rate": context.execute_run["threshold"],
+            #"invocation_rate": context.execute_run["threshold"],
             **flat
         }
 
