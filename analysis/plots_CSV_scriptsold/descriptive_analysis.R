@@ -79,10 +79,15 @@ summary_table_fdp <- df_fdp %>%
     sd_accuracy = sd(accuracy, na.rm = TRUE),
     min_accuracy = min(accuracy, na.rm = TRUE),
     max_accuracy = max(accuracy, na.rm = TRUE),
+    mean_ir = mean(invocation_rate, na.rm = TRUE),
+    median_ir = median(invocation_rate, na.rm = TRUE),
+    sd_ir = sd(invocation_rate, na.rm = TRUE),
+    min_ir = min(invocation_rate, na.rm = TRUE),
+    max_ir = max(invocation_rate, na.rm = TRUE),
     .groups = 'drop'
   )
 
-print(summary_table_fdp)
+head(summary_table_fdp)
 
 df_pdtm <- df_pdtm %>%
   mutate(
